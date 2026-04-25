@@ -31,10 +31,6 @@ def get_borrow(date):
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    # 過濾合計 + 非股票
-    df = df[~df["證券代號"].astype(str).str.contains("合計", na=False)]
-    df = df[df["證券代號"].astype(str).str.isnumeric()]
-
     # 找餘額欄
     target_col = None
     for col in df.columns:
@@ -53,50 +49,16 @@ def get_borrow(date):
         .astype(float)
     )
 
-    # 找名稱欄
-    name_col = None
-    for col in df.columns:
-        if "名稱" in col:
-            name_col = col
-            break
-
-    if name_col is None:
-        return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
-
-    return df[["證券代號", name_col, "餘額"]].rename(columns={name_col: "證券名稱"})
+    return df[["證券代號", "證券名稱", "餘額"]]
 
 
-# ===== 股本 =====
-def get_cap(date):
-    url = f"https://www.twse.com.tw/exchangeReport/BWIBBU_d?response=json&date={date}"
-    data = requests.get(url).json()
-
-    if not data.get("data") or not data.get("fields"):
+# ===== 股本（改成讀 cap.csv）=====
+def get_cap():
+    try:
+        df = pd.read_csv("cap.csv")
+        return df
+    except:
         return pd.DataFrame(columns=["證券代號","發行股數"])
-
-    df = pd.DataFrame(data["data"], columns=data["fields"])
-
-    # 找股本欄
-    cap_col = None
-    for col in df.columns:
-        if "股本" in col or "資本" in col:
-            cap_col = col
-            break
-
-    if cap_col is None:
-        return pd.DataFrame(columns=["證券代號","發行股數"])
-
-    df["股本"] = (
-        df[cap_col]
-        .astype(str)
-        .str.replace(",", "")
-        .replace("", "0")
-        .astype(float)
-    )
-
-    df["發行股數"] = df["股本"] * 10_000_000
-
-    return df[["證券代號", "發行股數"]]
 
 
 # ===== 主邏輯 =====
@@ -109,27 +71,23 @@ def build():
 
     t = get_borrow(today)
     y = get_borrow(yesterday)
-    cap = get_cap(today)
+    cap = get_cap()
 
-    if t.empty or y.empty:
-        return None, "❌ 借券資料異常"
+    if t.empty or y.empty or cap.empty:
+        return None, "❌ API資料異常或 cap.csv 不存在"
 
-    df = pd.merge(t, y, on="證券代號", how="inner", suffixes=("_t", "_y"))
+    # merge（保留名稱）
+    df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
+    df = pd.merge(df, cap, on="證券代號")
 
-    # ✅ 修正這裡（關鍵）
-    if "證券名稱_t" in df.columns:
-        df["證券名稱"] = df["證券名稱_t"]
+    # 用 today 名稱
+    df["證券名稱"] = df["證券名稱_t"]
 
-    if cap.empty:
-        df["使用率"] = 0
-        msg = f"⚠️ 無股本資料（{today}）"
-    else:
-        df = pd.merge(df, cap, on="證券代號", how="left")
-        df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
-        msg = f"📅 {today[:4]}-{today[4:6]}-{today[6:]}"
-
+    # 計算
+    df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
     df["增加量"] = df["餘額_t"] - df["餘額_y"]
 
+    # 主力判斷
     def judge(x):
         if x > 0:
             return "加空"
@@ -139,14 +97,16 @@ def build():
 
     df["動作"] = df["增加量"].apply(judge)
 
-    df = df.sort_values(by="餘額_t", ascending=False).head(30)
+    df = df.sort_values(by="使用率", ascending=False).head(30)
     df.insert(0, "排名", range(1, len(df)+1))
 
+    # 格式化
     df["使用率(%)"] = df["使用率"].map("{:.2f}".format)
     df["增加量"] = df["增加量"].map("{:+,.0f}".format)
     df["餘額"] = df["餘額_t"].map("{:,.0f}".format)
 
-    return df[["排名","證券代號","證券名稱","餘額","增加量","使用率(%)","動作"]], msg
+    display_date = f"{today[:4]}-{today[4:6]}-{today[6:]}"
+    return df[["排名","證券代號","證券名稱","餘額","增加量","使用率(%)","動作"]], f"📅 {display_date}"
 
 
 # ===== HTML =====
