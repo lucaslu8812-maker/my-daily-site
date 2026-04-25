@@ -24,12 +24,11 @@ jobs:
     - name: Install packages
       run: pip install -r requirements.txt
 
-    # ⭐ 新增：先產生 cap.csv（關鍵）
+    # ⭐ 新增這行（先產生 cap.csv）
     - name: Update cap
       run: python update_cap.py
 
-    # ⭐ 再跑借券
-    - name: Run borrow
+    - name: Run script
       run: python borrow.py
 
     - name: Commit & Push
