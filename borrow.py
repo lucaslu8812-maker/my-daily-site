@@ -31,8 +31,11 @@ def get_borrow(date):
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    # 過濾合計列（很重要）
+    # 過濾合計列
     df = df[~df["證券代號"].astype(str).str.contains("合計")]
+
+    # ⭐ 統一代號格式
+    df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
 
     # 找餘額欄
     target_col = None
@@ -55,10 +58,14 @@ def get_borrow(date):
     return df[["證券代號", "證券名稱", "餘額"]]
 
 
-# ===== 讀 cap.csv（重點改這裡）=====
+# ===== 讀 cap.csv =====
 def get_cap():
     try:
         df = pd.read_csv("cap.csv")
+
+        # ⭐ 統一代號格式（關鍵）
+        df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
+
         return df
     except:
         return pd.DataFrame(columns=["證券代號","發行股數"])
@@ -79,13 +86,15 @@ def build():
     if t.empty or y.empty:
         return None, "❌ API資料異常"
 
+    # ⭐ 保險（再統一一次）
+    t["證券代號"] = t["證券代號"].astype(str)
+    y["證券代號"] = y["證券代號"].astype(str)
+
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
 
-    # 合併股本（有才用）
+    # 合併股本
     if not cap.empty:
         df = pd.merge(df, cap, on="證券代號", how="left")
-
-        # 計算使用率（避免除以0）
         df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
     else:
         df["使用率"] = 0
@@ -102,7 +111,7 @@ def build():
 
     df["動作"] = df["增加量"].apply(judge)
 
-    # 排序（有使用率就用，沒有就用增加量）
+    # 排序
     if "發行股數" in df.columns:
         df = df.sort_values(by="使用率", ascending=False)
     else:
