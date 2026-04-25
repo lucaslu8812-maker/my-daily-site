@@ -31,10 +31,7 @@ def get_borrow(date):
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    # 統一代號格式
-    df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
-
-    # 找餘額欄位
+    # 找餘額欄
     target_col = None
     for col in df.columns:
         if "餘額" in col:
@@ -52,43 +49,20 @@ def get_borrow(date):
         .astype(float)
     )
 
+    df["證券代號"] = df["證券代號"].astype(str)
+
     return df[["證券代號", "證券名稱", "餘額"]]
 
 
-# ===== 股本（從 cap.csv 轉發行股數）=====
+# ===== 讀 cap.csv =====
 def get_cap():
     try:
         df = pd.read_csv("cap.csv")
 
-        # ⭐ 統一代號格式
-        df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
+        df["證券代號"] = df["證券代號"].astype(str)
 
-        # ⭐ 自動找股本欄
-        cap_col = None
-        for col in df.columns:
-            if "股本" in col:
-                cap_col = col
-                break
-
-        if cap_col is None:
-            print("❌ cap.csv 沒有股本欄位:", df.columns)
-            return pd.DataFrame(columns=["證券代號","發行股數"])
-
-        # ⭐ 股本 → 發行股數
-        df["股本"] = (
-            df[cap_col]
-            .astype(str)
-            .str.replace(",", "")
-            .replace("", "0")
-            .astype(float)
-        )
-
-        df["發行股數"] = df["股本"] * 10_000_000
-
-        return df[["證券代號", "發行股數"]]
-
-    except Exception as e:
-        print("❌ 讀取 cap.csv 失敗:", e)
+        return df
+    except:
         return pd.DataFrame(columns=["證券代號","發行股數"])
 
 
@@ -104,24 +78,20 @@ def build():
     y = get_borrow(yesterday)
     cap = get_cap()
 
-    if t.empty or y.empty:
+    if t.empty or y.empty or cap.empty:
         return None, "❌ API資料異常"
 
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
+    df = pd.merge(df, cap, on="證券代號", how="left")
 
-    # 合併股本
-    if not cap.empty:
-        df = pd.merge(df, cap, on="證券代號", how="left")
+    # ⭐ 修正：排除彈性面額股票（名稱有 *）
+    df = df[~df["證券名稱_t"].str.contains(r"\*", na=False)]
 
-        df["發行股數"] = pd.to_numeric(df["發行股數"], errors="coerce")
-        df["發行股數"] = df["發行股數"].replace(0, pd.NA)
+    # ⭐ 避免發行股數為0或NaN
+    df = df[df["發行股數"] > 0]
 
-        # 使用率（百分比）
-        df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
-        df["使用率"] = df["使用率"].fillna(0)
-    else:
-        df["使用率"] = 0
-
+    # ===== 計算 =====
+    df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
     df["增加量"] = df["餘額_t"] - df["餘額_y"]
 
     # 主力判斷
