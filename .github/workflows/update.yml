@@ -24,12 +24,12 @@ jobs:
     - name: Install packages
       run: pip install -r requirements.txt
 
-    # 🔥 關鍵新增（先產生股本）
-    - name: Update cap.csv
+    # ⭐ 新增：先產生 cap.csv（關鍵）
+    - name: Update cap
       run: python update_cap.py
 
-    # 🔥 原本的主程式
-    - name: Run script
+    # ⭐ 再跑借券
+    - name: Run borrow
       run: python borrow.py
 
     - name: Commit & Push
