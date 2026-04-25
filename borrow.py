@@ -3,7 +3,7 @@ import requests
 from datetime import datetime, timedelta
 import pytz
 
-# ✅ 防擋（關鍵修正）
+# ✅ 防擋
 HEADERS = {
     "User-Agent": "Mozilla/5.0"
 }
@@ -25,7 +25,7 @@ def get_valid_date(offset_start=1):
     return None
 
 
-# ===== 借券賣出餘額（防欄位變動）=====
+# ===== 借券賣出餘額 =====
 def get_borrow(date):
     url = f"https://www.twse.com.tw/exchangeReport/TWT72U?response=json&date={date}"
     data = requests.get(url, headers=HEADERS).json()
@@ -34,6 +34,9 @@ def get_borrow(date):
         return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
+
+    # 🔥 修正1：過濾「合計」
+    df = df[df["證券代號"] != "合計"]
 
     # 自動找餘額欄
     target_col = None
@@ -57,7 +60,7 @@ def get_borrow(date):
     return df[["證券代號", "證券名稱", "餘額"]]
 
 
-# ===== 股本（防欄位變動）=====
+# ===== 股本 =====
 def get_cap(date):
     url = f"https://www.twse.com.tw/exchangeReport/BWIBBU_d?response=json&date={date}"
     data = requests.get(url, headers=HEADERS).json()
@@ -103,11 +106,17 @@ def build():
     y = get_borrow(yesterday)
     cap = get_cap(today)
 
-    if t.empty or y.empty or cap.empty:
-        return None, "❌ API資料異常"
+    # 🔥 修正2：不要因為股本空就整包失敗
+    if t.empty or y.empty:
+        return None, "❌ 借券資料異常"
 
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
-    df = pd.merge(df, cap, on="證券代號")
+
+    # ⭐ 改成 left join（關鍵）
+    df = pd.merge(df, cap, on="證券代號", how="left")
+
+    # ⭐ 沒股本的丟掉
+    df = df.dropna(subset=["發行股數"])
 
     # 計算
     df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
