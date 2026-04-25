@@ -25,11 +25,11 @@ def get_valid_date(offset_start=1):
     return None
 
 
-# ===== 借券資料（含 retry + 正確欄位）=====
+# ===== 借券資料 =====
 def get_borrow(date):
     url = f"https://www.twse.com.tw/exchangeReport/TWT72U?response=json&date={date}"
 
-    for _ in range(3):  # retry 3次
+    for _ in range(3):
         try:
             res = requests.get(url, timeout=10)
             data = res.json()
@@ -39,17 +39,13 @@ def get_borrow(date):
 
             df = pd.DataFrame(data["data"], columns=data["fields"])
 
-            # 防欄位異常
             if "證券代號" not in df.columns:
                 return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
 
             df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
 
-            # ⭐ 固定抓「借券 當日餘額」（第12欄）
-            try:
-                target_col = df.columns[12]
-            except:
-                return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
+            # ⭐ 借券「當日餘額」
+            target_col = df.columns[12]
 
             df["餘額"] = (
                 df[target_col]
@@ -67,7 +63,7 @@ def get_borrow(date):
     return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
 
 
-# ===== 讀 cap.csv =====
+# ===== 股本 =====
 def get_cap():
     try:
         df = pd.read_csv("cap.csv")
@@ -110,7 +106,6 @@ def build():
     y = get_borrow(yesterday)
     cap = get_cap()
 
-    # ⭐ 關鍵：API壞掉 → 不更新
     if t.empty or y.empty:
         print("⚠️ API失敗，本次不更新")
         return None, None
@@ -151,11 +146,11 @@ def build():
     return df[["排名","證券代號","證券名稱_t","餘額","增加量","使用率(%)","動作"]], f"📅 {display_date}"
 
 
-# ===== HTML（升級版）=====
+# ===== HTML =====
 def generate_html(df, msg):
     now = datetime.now(pytz.timezone("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
 
-    # ⭐ API壞掉 → 完全不覆蓋
+    # ⭐ API壞掉 → 顯示最後日期 + 不更新資料
     if df is None or df.empty:
         print("⚠️ 無有效資料，不覆蓋 index.html")
 
@@ -164,11 +159,36 @@ def generate_html(df, msg):
                 old_html = f.read()
 
             m = re.search(r"📅 (\d{4}-\d{2}-\d{2})", old_html)
-            if m:
-                print(f"📅 保留舊資料日期: {m.group(1)}")
+            last_date = m.group(1) if m else "未知"
+        else:
+            last_date = "未知"
+
+        html = f"""
+        <html>
+        <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="refresh" content="300">
+        <style>
+        body {{ font-family:sans-serif;background:#f5f5f5; }}
+        .box {{ max-width:1000px;margin:auto;background:white;padding:20px }}
+        </style>
+        </head>
+        <body>
+        <div class="box">
+        <h2>📊 借券監控</h2>
+        <p>📅 最後更新：{last_date}</p>
+        <p>⚠️ 今日資料尚未更新</p>
+        </div>
+        </body>
+        </html>
+        """
+
+        with open("index.html","w",encoding="utf-8") as f:
+            f.write(html)
 
         return
 
+    # ===== 正常畫面 =====
     rows = ""
     for _, r in df.iterrows():
         rate = float(r["使用率(%)"])
