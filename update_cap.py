@@ -1,53 +1,67 @@
 import pandas as pd
 import requests
+import os
 
-# ===== 用證交所資料（穩定）=====
 url = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 
-res = requests.get(url, timeout=10)
+try:
+    res = requests.get(url, timeout=10)
 
-if res.status_code != 200:
-    raise Exception("❌ API 失敗")
+    # ⭐ 檢查 HTTP 狀態
+    if res.status_code != 200:
+        raise Exception(f"HTTP錯誤: {res.status_code}")
 
-data = res.json()
+    # ⭐ 檢查內容（避免空內容）
+    if not res.text.strip():
+        raise Exception("API回傳空資料")
 
-df = pd.DataFrame(data)
+    try:
+        data = res.json()
+    except:
+        raise Exception("JSON解析失敗（可能被擋或API掛掉）")
 
-# ===== 找欄位 =====
-code_col = None
-cap_col = None
+    df = pd.DataFrame(data)
 
-for col in df.columns:
-    if "公司代號" in col:
-        code_col = col
-    if "實收資本額" in col:
-        cap_col = col
+    # ===== 找欄位 =====
+    code_col = None
+    cap_col = None
 
-if code_col is None or cap_col is None:
-    raise Exception(f"❌ 找不到欄位: {df.columns}")
+    for col in df.columns:
+        if "公司代號" in col:
+            code_col = col
+        if "實收資本額" in col:
+            cap_col = col
 
-# ===== 整理 =====
-df = df[[code_col, cap_col]].copy()
-df.columns = ["證券代號", "股本"]
+    if code_col is None or cap_col is None:
+        raise Exception(f"找不到欄位: {df.columns}")
 
-# ===== 清洗 =====
-df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
+    # ===== 整理 =====
+    df = df[[code_col, cap_col]].copy()
+    df.columns = ["證券代號", "股本"]
 
-df["股本"] = (
-    df["股本"]
-    .astype(str)
-    .str.replace(",", "")
-    .replace("", "0")
-    .astype(float)
-)
+    df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
 
-# 👉 單位是「元」，轉成「億元」
-df["股本"] = df["股本"] / 100000000
+    df["股本"] = (
+        df["股本"]
+        .astype(str)
+        .str.replace(",", "")
+        .replace("", "0")
+        .astype(float)
+    )
 
-# ===== 過濾股票 =====
-df = df[df["證券代號"].str.match(r"^\d{4}$")]
+    df["股本"] = df["股本"] / 100000000
 
-# ===== 存檔 =====
-df.to_csv("cap.csv", index=False, encoding="utf-8-sig")
+    df = df[df["證券代號"].str.match(r"^\d{4}$")]
 
-print(f"✅ cap.csv 更新完成，共 {len(df)} 筆")
+    df.to_csv("cap.csv", index=False, encoding="utf-8-sig")
+
+    print(f"✅ cap.csv 更新完成，共 {len(df)} 筆")
+
+except Exception as e:
+    print(f"⚠️ cap API 失敗: {e}")
+
+    # ⭐ 關鍵：如果已有 cap.csv → 不覆蓋
+    if os.path.exists("cap.csv"):
+        print("📁 保留舊的 cap.csv")
+    else:
+        print("❌ 沒有 cap.csv 可用")
