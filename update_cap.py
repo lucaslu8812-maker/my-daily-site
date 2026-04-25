@@ -1,18 +1,30 @@
 import pandas as pd
 
-url = "https://raw.githubusercontent.com/FinMind/FinMind/master/dataset/TaiwanStockInfo.csv"
+url = "https://mopsfin.twse.com.tw/opendata/t187ap03_L.csv"
 
-df = pd.read_csv(url)
+df = pd.read_csv(url, encoding="utf-8")
 
-# 只留上市股票
-df = df[df["type"] == "twse"]
+# 找股數欄（最重要）
+target_col = None
+for col in df.columns:
+    if "股數" in col:
+        target_col = col
+        break
 
-df = df[["stock_id", "stock_name"]]
-df.columns = ["證券代號", "證券名稱"]
+if target_col is None:
+    raise Exception(f"❌ 找不到股數欄位: {df.columns}")
 
-# 👉 假設股本（簡化用）
-df["發行股數"] = 1_000_000_000  # 先給固定值避免炸
+df = df[["公司代號", target_col]]
+df.columns = ["證券代號", "發行股數"]
 
-df.to_csv("cap.csv", index=False, encoding="utf-8-sig")
+# 轉數字
+df["發行股數"] = (
+    df["發行股數"]
+    .astype(str)
+    .str.replace(",", "")
+    .astype(float)
+)
 
-print("✅ cap.csv 建立（簡化版）")
+df.to_csv("cap.csv", index=False, encoding="utf-8")
+
+print("✅ cap.csv 更新完成")
