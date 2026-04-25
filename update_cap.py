@@ -1,44 +1,42 @@
 import pandas as pd
 import requests
 
-def update_cap():
-    url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=ALL"
-    data = requests.get(url, timeout=10).json()
+url = "https://www.twse.com.tw/exchangeReport/BWIBBU_d?response=json"
 
-    if "data9" not in data:
-        print("❌ 抓不到資料")
-        return
+res = requests.get(url)
 
-    df = pd.DataFrame(data["data9"], columns=data["fields9"])
+try:
+    data = res.json()
+except:
+    raise Exception("❌ API 不是 JSON")
 
-    code_col = None
-    cap_col = None
+if not data.get("data") or not data.get("fields"):
+    raise Exception("❌ 沒抓到股本資料")
 
-    for col in df.columns:
-        if "證券代號" in col:
-            code_col = col
-        if "股本" in col or "資本" in col:
-            cap_col = col
+df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    if not code_col or not cap_col:
-        print("❌ 欄位錯誤")
-        return
+# 找股本欄
+cap_col = None
+for col in df.columns:
+    if "股本" in col or "資本" in col:
+        cap_col = col
+        break
 
-    df = df[[code_col, cap_col]]
-    df.columns = ["證券代號", "股本"]
+if cap_col is None:
+    raise Exception(f"❌ 找不到股本欄位: {df.columns}")
 
-    df["股本"] = (
-        df["股本"].astype(str)
-        .str.replace(",", "")
-        .replace("", "0")
-        .astype(float)
-    )
+df["股本"] = (
+    df[cap_col]
+    .astype(str)
+    .str.replace(",", "")
+    .replace("", "0")
+    .astype(float)
+)
 
-    df["發行股數"] = df["股本"] * 1000
+df["發行股數"] = df["股本"] * 10_000_000
 
-    df[["證券代號", "發行股數"]].to_csv("cap.csv", index=False, encoding="utf-8-sig")
+df = df[["證券代號", "發行股數"]]
 
-    print("✅ cap.csv 更新完成")
+df.to_csv("cap.csv", index=False, encoding="utf-8-sig")
 
-if __name__ == "__main__":
-    update_cap()
+print("✅ cap.csv 產生成功")
