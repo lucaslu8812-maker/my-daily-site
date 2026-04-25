@@ -44,7 +44,7 @@ def get_borrow(date):
 
             df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
 
-            # ⭐ 固定抓「借券 當日餘額」（第12欄）
+            # 固定抓第12欄（借券當日餘額）
             try:
                 target_col = df.columns[12]
             except:
@@ -109,7 +109,7 @@ def build():
     y = get_borrow(yesterday)
     cap = get_cap()
 
-    # ⭐ API壞掉 → 不更新
+    # API壞掉 → 不更新
     if t.empty or y.empty:
         print("⚠️ API失敗，本次不更新")
         return None, "⚠️ 今日資料尚未更新"
@@ -136,7 +136,7 @@ def build():
 
     df["動作"] = df["增加量"].apply(judge)
 
-    # ⭐ 移除 * 股票
+    # 移除 * 股票
     df = df[~df["證券名稱_t"].str.contains(r"\*", na=False)]
 
     df = df.sort_values(by="使用率", ascending=False).head(30)
@@ -154,11 +154,10 @@ def build():
 def generate_html(df, msg):
     now = datetime.now(pytz.timezone("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
 
-    # ⭐ API壞掉 → 不覆蓋
+    # API壞掉 → 不覆蓋
     if df is None or df.empty:
         print("⚠️ 無有效資料，不覆蓋 index.html")
 
-        # 有舊資料 → 保留
         if os.path.exists("index.html"):
             with open("index.html", "r", encoding="utf-8") as f:
                 old_html = f.read()
@@ -220,7 +219,7 @@ def generate_html(df, msg):
     </head>
     <body>
     <div class="box">
-    <h2>📊 借券監控</h2>
+    <h2>📊 上市券賣監控</h2>
     <p>{msg if msg else "⚠️ 尚無資料（等待API恢復）"}</p>
     <p>更新時間：{now}</p>
     <table>
