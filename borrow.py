@@ -14,12 +14,13 @@ def get_valid_date(offset_start=1):
     tz = pytz.timezone("Asia/Taipei")
     now = datetime.now(tz)
 
-    for i in range(offset_start, offset_start + 7):
+    for i in range(offset_start, offset_start + 30):
         d = (now - timedelta(days=i)).strftime("%Y%m%d")
         try:
             url = f"https://www.twse.com.tw/exchangeReport/TWT93U?response=json&date={d}"
             data = requests.get(url, headers=HEADERS, timeout=10).json()
             if data.get("stat") == "OK" and data.get("data"):
+                print("使用日期:", d)
                 return d
         except:
             continue
