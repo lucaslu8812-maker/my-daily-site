@@ -1,13 +1,19 @@
 import pandas as pd
 import requests
+from io import StringIO
 
-# ===== 政府資料（上市公司基本資料，含股本）=====
 url = "https://quality.data.gov.tw/dq_download_csv.php?nid=18419"
 
-# 下載
-df = pd.read_csv(url)
+# ===== 正確抓資料 =====
+res = requests.get(url)
 
-# ===== 找欄位（避免改名）=====
+if res.status_code != 200:
+    raise Exception("❌ 下載失敗")
+
+# 👉 用 StringIO 轉成 CSV
+df = pd.read_csv(StringIO(res.text))
+
+# ===== 找欄位 =====
 code_col = None
 cap_col = None
 
@@ -35,10 +41,10 @@ df["股本"] = (
     .astype(float)
 )
 
-# 過濾掉非股票（例如空白 / ETF / 無代號）
+# 只留4碼股票
 df = df[df["證券代號"].str.match(r"^\d{4}$")]
 
-# ===== 存檔（給 borrow.py 用）=====
+# ===== 輸出 =====
 df.to_csv("cap.csv", index=False, encoding="utf-8-sig")
 
 print(f"✅ cap.csv 更新完成，共 {len(df)} 筆")
