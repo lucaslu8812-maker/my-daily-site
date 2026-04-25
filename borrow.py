@@ -162,6 +162,21 @@ def generate_html(df, msg):
     # ⭐⭐⭐ 不覆蓋舊資料（關鍵）
     if df is None or df.empty:
         print("⚠️ 無有效資料，不覆蓋 index.html")
+         # ⭐ 如果檔案不存在 → 建立最小頁面（避免死鎖）
+        import os
+        if not os.path.exists("index.html"):
+            print("🆕 建立初始 index.html")
+
+            with open("index.html","w",encoding="utf-8") as f:
+                f.write("""
+                <html>
+                <head><meta charset="UTF-8"></head>
+                <body>
+                <h2>📊 借券監控</h2>
+                <p>⚠️ 尚無資料（等待API恢復）</p>
+                </body>
+                </html>
+                """)
         return
 
     rows = ""
