@@ -31,6 +31,9 @@ def get_borrow(date):
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
+    # 過濾合計列（很重要）
+    df = df[~df["證券代號"].astype(str).str.contains("合計")]
+
     # 找餘額欄
     target_col = None
     for col in df.columns:
@@ -52,7 +55,7 @@ def get_borrow(date):
     return df[["證券代號", "證券名稱", "餘額"]]
 
 
-# ===== 股本（改成讀 cap.csv）=====
+# ===== 讀 cap.csv（重點改這裡）=====
 def get_cap():
     try:
         df = pd.read_csv("cap.csv")
@@ -73,18 +76,20 @@ def build():
     y = get_borrow(yesterday)
     cap = get_cap()
 
-    if t.empty or y.empty or cap.empty:
-        return None, "❌ API資料異常或 cap.csv 不存在"
+    if t.empty or y.empty:
+        return None, "❌ API資料異常"
 
-    # merge（保留名稱）
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
-    df = pd.merge(df, cap, on="證券代號")
 
-    # 用 today 名稱
-    df["證券名稱"] = df["證券名稱_t"]
+    # 合併股本（有才用）
+    if not cap.empty:
+        df = pd.merge(df, cap, on="證券代號", how="left")
 
-    # 計算
-    df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
+        # 計算使用率（避免除以0）
+        df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
+    else:
+        df["使用率"] = 0
+
     df["增加量"] = df["餘額_t"] - df["餘額_y"]
 
     # 主力判斷
@@ -97,16 +102,22 @@ def build():
 
     df["動作"] = df["增加量"].apply(judge)
 
-    df = df.sort_values(by="使用率", ascending=False).head(30)
+    # 排序（有使用率就用，沒有就用增加量）
+    if "發行股數" in df.columns:
+        df = df.sort_values(by="使用率", ascending=False)
+    else:
+        df = df.sort_values(by="增加量", ascending=False)
+
+    df = df.head(30)
     df.insert(0, "排名", range(1, len(df)+1))
 
     # 格式化
-    df["使用率(%)"] = df["使用率"].map("{:.2f}".format)
+    df["使用率(%)"] = df["使用率"].fillna(0).map("{:.2f}".format)
     df["增加量"] = df["增加量"].map("{:+,.0f}".format)
     df["餘額"] = df["餘額_t"].map("{:,.0f}".format)
 
     display_date = f"{today[:4]}-{today[4:6]}-{today[6:]}"
-    return df[["排名","證券代號","證券名稱","餘額","增加量","使用率(%)","動作"]], f"📅 {display_date}"
+    return df[["排名","證券代號","證券名稱_t","餘額","增加量","使用率(%)","動作"]], f"📅 {display_date}"
 
 
 # ===== HTML =====
@@ -114,7 +125,7 @@ def generate_html(df, msg):
     now = datetime.now(pytz.timezone("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
 
     if df is None:
-        df = pd.DataFrame([{"排名":"-","證券代號":"-","證券名稱":"無資料"}])
+        df = pd.DataFrame([{"排名":"-","證券代號":"-","證券名稱_t":"無資料"}])
 
     rows = ""
     for _, r in df.iterrows():
@@ -130,7 +141,7 @@ def generate_html(df, msg):
         <tr style="{style}">
             <td>{r.get('排名','')}</td>
             <td>{r.get('證券代號','')}</td>
-            <td>{r.get('證券名稱','')}</td>
+            <td>{r.get('證券名稱_t','')}</td>
             <td>{r.get('餘額','')}</td>
             <td>{r.get('增加量','')}</td>
             <td>{r.get('使用率(%)','')}</td>
