@@ -3,43 +3,40 @@ import requests
 from datetime import datetime, timedelta
 import pytz
 
+# ⭐ 避免被擋
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json"
+}
 
-# ===== 找最近N個有資料交易日 =====
-def get_last_n_valid_dates(n=3):
+# ===== 找最近交易日 =====
+def get_valid_date(offset_start=1):
     tz = pytz.timezone("Asia/Taipei")
     now = datetime.now(tz)
 
-    dates = []
-
-    for i in range(1, 15):
+    for i in range(offset_start, offset_start + 7):
         d = (now - timedelta(days=i)).strftime("%Y%m%d")
         try:
             url = f"https://www.twse.com.tw/exchangeReport/TWT93U?response=json&date={d}"
-            data = requests.get(url, timeout=10).json()
-
+            data = requests.get(url, headers=HEADERS, timeout=10).json()
             if data.get("stat") == "OK" and data.get("data"):
-                dates.append(d)
-
-            if len(dates) >= n:
-                return dates
-
+                return d
         except:
             continue
+    return None
 
-    return dates
 
-
-# ===== 借券賣出餘額 =====
+# ===== 借券資料（✅修正 * 過濾）=====
 def get_borrow(date):
     url = f"https://www.twse.com.tw/exchangeReport/TWT93U?response=json&date={date}"
-    data = requests.get(url).json()
+    data = requests.get(url, headers=HEADERS, timeout=10).json()
 
     if not data.get("data") or not data.get("fields"):
         return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    # ⭐ 自動找欄位
+    # ⭐ 自動抓欄位
     code_col = None
     name_col = None
 
@@ -56,15 +53,18 @@ def get_borrow(date):
     df["證券代號"] = df[code_col].astype(str).str.zfill(4)
     df["證券名稱"] = df[name_col]
 
-    # ⭐ 抓「當日餘額」
+    # ⭐⭐⭐ 關鍵：在這裡過濾 *（半形+全形）
+    df = df[~df["證券名稱"].str.contains(r"[\*\＊]", na=False)]
+
+    # ⭐ 抓「借券賣出當日餘額」
     target_col = None
     for col in df.columns:
-        if "當日餘額" in col:
+        if "借券賣出" in col and "當日餘額" in col:
             target_col = col
             break
 
     if target_col is None:
-        print("❌ 找不到當日餘額:", df.columns)
+        print("❌ 找不到借券當日餘額:", df.columns)
         return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
 
     df["餘額"] = (
@@ -82,78 +82,39 @@ def get_borrow(date):
 def get_cap():
     try:
         df = pd.read_csv("cap.csv")
-
         df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
-
-        cap_col = None
-        for col in df.columns:
-            if "股本" in col:
-                cap_col = col
-                break
-
-        if cap_col is None:
-            return pd.DataFrame(columns=["證券代號","發行股數"])
-
-        df["股本"] = (
-            df[cap_col]
-            .astype(str)
-            .str.replace(",", "")
-            .replace("", "0")
-            .astype(float)
-        )
-
-        df["發行股數"] = df["股本"] * 10_000_000
-
-        return df[["證券代號", "發行股數"]]
-
+        return df
     except:
         return pd.DataFrame(columns=["證券代號","發行股數"])
 
 
 # ===== 主邏輯 =====
 def build():
-    dates = get_last_n_valid_dates(3)
+    today = get_valid_date(1)
+    yesterday = get_valid_date(2)
 
-    if len(dates) < 2:
+    if not today or not yesterday:
         return None, "❌ 無資料"
-
-    valid_dates = []
-    for d in dates:
-        test = get_borrow(d)
-        if not test.empty:
-            valid_dates.append(d)
-
-        if len(valid_dates) == 2:
-            break
-
-    if len(valid_dates) < 2:
-        return None, "❌ 無有效資料"
-
-    today, yesterday = valid_dates[0], valid_dates[1]
 
     t = get_borrow(today)
     y = get_borrow(yesterday)
     cap = get_cap()
 
-    if t.empty or y.empty:
+    if t.empty or y.empty or cap.empty:
         return None, "❌ API資料異常"
 
+    # ⭐ 若只有股本 → 轉發行股數
+    if "發行股數" not in cap.columns and "股本" in cap.columns:
+        cap["發行股數"] = cap["股本"] * 100000000 / 10
+
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
+    df = pd.merge(df, cap, on="證券代號", how="left")
 
-    # ⭐ ⭐ ⭐ 補回你原本的過濾（很重要）
-    df = df[~df["證券名稱_t"].str.contains(r"[\*\＊]", na=False)]
+    # ⭐ 避免異常
+    df = df[df["發行股數"] > 0]
 
-    if not cap.empty:
-        df = pd.merge(df, cap, on="證券代號", how="left")
-
-        df["發行股數"] = pd.to_numeric(df["發行股數"], errors="coerce")
-        df["發行股數"] = df["發行股數"].replace(0, pd.NA)
-
-        df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
-        df["使用率"] = df["使用率"].fillna(0)
-    else:
-        df["使用率"] = 0
-
+    # ===== 計算 =====
+    df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
     df["增加量"] = df["餘額_t"] - df["餘額_y"]
 
     def judge(x):
@@ -168,6 +129,7 @@ def build():
     df = df.sort_values(by="使用率", ascending=False).head(30)
     df.insert(0, "排名", range(1, len(df)+1))
 
+    # 格式化
     df["使用率(%)"] = df["使用率"].map("{:.2f}".format)
     df["增加量"] = df["增加量"].map("{:+,.0f}".format)
     df["餘額"] = df["餘額_t"].map("{:,.0f}".format)
