@@ -31,7 +31,6 @@ def get_borrow(date):
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    # 找餘額欄
     target_col = None
     for col in df.columns:
         if "餘額" in col:
@@ -58,9 +57,7 @@ def get_borrow(date):
 def get_cap():
     try:
         df = pd.read_csv("cap.csv")
-
         df["證券代號"] = df["證券代號"].astype(str)
-
         return df
     except:
         return pd.DataFrame(columns=["證券代號","發行股數"])
@@ -81,20 +78,23 @@ def build():
     if t.empty or y.empty or cap.empty:
         return None, "❌ API資料異常"
 
+    # ⭐ 修BUG：如果沒有發行股數，自動由股本換算
+    if "發行股數" not in cap.columns and "股本" in cap.columns:
+        cap["發行股數"] = cap["股本"] * 100000000 / 10
+
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
     df = pd.merge(df, cap, on="證券代號", how="left")
 
-    # ⭐ 修正：排除彈性面額股票（名稱有 *）
+    # ⭐ 修正：排除彈性面額股票
     df = df[~df["證券名稱_t"].str.contains(r"\*", na=False)]
 
-    # ⭐ 避免發行股數為0或NaN
+    # ⭐ 避免發行股數異常
     df = df[df["發行股數"] > 0]
 
     # ===== 計算 =====
     df["使用率"] = df["餘額_t"] / df["發行股數"] * 100
     df["增加量"] = df["餘額_t"] - df["餘額_y"]
 
-    # 主力判斷
     def judge(x):
         if x > 0:
             return "加空"
