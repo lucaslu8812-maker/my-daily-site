@@ -14,7 +14,8 @@ def get_last_n_valid_dates(n=3):
     for i in range(1, 15):
         d = (now - timedelta(days=i)).strftime("%Y%m%d")
         try:
-            url = f"https://www.twse.com.tw/exchangeReport/TWT72U?response=json&date={d}"
+            # ⭐ 改這裡：TWT93U
+            url = f"https://www.twse.com.tw/exchangeReport/TWT93U?response=json&date={d}"
             data = requests.get(url, timeout=10).json()
 
             if data.get("stat") == "OK" and data.get("data"):
@@ -29,9 +30,10 @@ def get_last_n_valid_dates(n=3):
     return dates
 
 
-# ===== 借券賣出餘額（正確抓「當日餘額」）=====
+# ===== 借券賣出餘額（正確抓）=====
 def get_borrow(date):
-    url = f"https://www.twse.com.tw/exchangeReport/TWT72U?response=json&date={date}"
+    # ⭐ 改這裡：TWT93U
+    url = f"https://www.twse.com.tw/exchangeReport/TWT93U?response=json&date={date}"
     data = requests.get(url).json()
 
     if not data.get("data") or not data.get("fields"):
@@ -39,20 +41,17 @@ def get_borrow(date):
 
     df = pd.DataFrame(data["data"], columns=data["fields"])
 
-    # 統一代號格式
     df["證券代號"] = df["證券代號"].astype(str).str.zfill(4)
 
-    # ⭐ 只在借券區找「當日餘額」
-    borrow_cols = df.columns[8:]
-
+    # ⭐ 改這裡：直接抓「當日餘額」
     target_col = None
-    for col in borrow_cols:
+    for col in df.columns:
         if "當日餘額" in col:
             target_col = col
             break
 
     if target_col is None:
-        print("❌ 找不到借券當日餘額:", df.columns)
+        print("❌ 找不到當日餘額欄:", df.columns)
         return pd.DataFrame(columns=["證券代號","證券名稱","餘額"])
 
     df["餘額"] = (
@@ -100,13 +99,11 @@ def get_cap():
 
 # ===== 主邏輯 =====
 def build():
-    # ⭐ 抓最近3天（避免今天沒資料）
     dates = get_last_n_valid_dates(3)
 
     if len(dates) < 2:
         return None, "❌ 無資料"
 
-    # ⭐ 過濾真正有資料的兩天
     valid_dates = []
     for d in dates:
         test = get_borrow(d)
@@ -130,7 +127,6 @@ def build():
 
     df = pd.merge(t, y, on="證券代號", suffixes=("_t", "_y"))
 
-    # 合併股本
     if not cap.empty:
         df = pd.merge(df, cap, on="證券代號", how="left")
 
@@ -156,7 +152,6 @@ def build():
     df = df.sort_values(by="使用率", ascending=False).head(30)
     df.insert(0, "排名", range(1, len(df)+1))
 
-    # 格式化
     df["使用率(%)"] = df["使用率"].map("{:.2f}".format)
     df["增加量"] = df["增加量"].map("{:+,.0f}".format)
     df["餘額"] = df["餘額_t"].map("{:,.0f}".format)
